@@ -50,6 +50,8 @@ export type AppState = {
   otherHospitalContacts: HospitalContact[];
   hospitalContactsRevision: number;
   doses: Dose[];
+  /** Raised by recording, undoing and schedule changes so a stale browser tab cannot overwrite them. */
+  dosesRevision: number;
   medicationSchedule: MedicationSchedule;
   sharing: { caregiver: boolean; hospital: boolean };
   reminders: {
@@ -144,6 +146,7 @@ export function createInitialState(now = new Date()): AppState {
     otherHospitalContacts: [],
     hospitalContactsRevision: 0,
     doses: dosesForDate(localDateKey(now), medicationSchedule),
+    dosesRevision: 0,
     medicationSchedule,
     sharing: { caregiver: false, hospital: false },
     reminders: {
@@ -266,7 +269,8 @@ export function recordDose(state: AppState, doseId: string, taken: boolean, now 
     delete pendingDose.photo;
     return pendingDose;
   });
-  return withActivity({ ...state, doses }, `${formatDate(dose.date)} ${dose.time} ${dose.label}${taken ? ' 사진으로 기록했어요' : '의 복약 기록을 취소했어요'}`, now);
+  return withActivity({ ...state, doses, dosesRevision: nextVisitRevision(state.dosesRevision, now) },
+    `${formatDate(dose.date)} ${dose.time} ${dose.label}${taken ? ' 사진으로 기록했어요' : '의 복약 기록을 취소했어요'}`, now);
 }
 
 export function normalizePatientName(input: string): string {
@@ -293,7 +297,7 @@ export function completeSetup(state: AppState, name: string, schedule: Medicatio
   if (!fresh) return scheduled;
   const today = localDateKey(now);
   return { ...scheduled, doses: [...scheduled.doses.filter(dose => dose.date !== today),
-    ...dosesForDate(today, scheduled.medicationSchedule, profile.startedAt)] };
+    ...dosesForDate(today, scheduled.medicationSchedule, profile.startedAt)], dosesRevision: nextVisitRevision(scheduled.dosesRevision, now) };
 }
 
 export function setSharing(state: AppState, recipient: 'caregiver' | 'hospital', enabled: boolean, now = new Date()): AppState {
@@ -340,7 +344,7 @@ export function setMedicationSchedule(state: AppState, input: MedicationSchedule
   const doses = recordedToday ? state.doses : [
     ...state.doses.filter(dose => dose.date !== today), ...replacement,
   ];
-  return withActivity({ ...state, medicationSchedule, doses },
+  return withActivity({ ...state, medicationSchedule, doses, dosesRevision: nextVisitRevision(state.dosesRevision, now) },
     `복약 일정을 ${medicationScheduleLabel(medicationSchedule)} ${medicationSchedule.times.join(' · ')}로 변경했어요${recordedToday ? ' · 내일부터 적용' : ''}`, now);
 }
 
@@ -411,6 +415,8 @@ export function validateLoadedState(value: unknown): AppState {
     !Number.isSafeInteger(value.visitsRevision) || value.visitsRevision < 0)) return invalid();
   if (value.hospitalContactsRevision !== undefined && (typeof value.hospitalContactsRevision !== 'number' ||
     !Number.isSafeInteger(value.hospitalContactsRevision) || value.hospitalContactsRevision < 0)) return invalid();
+  if (value.dosesRevision !== undefined && (typeof value.dosesRevision !== 'number' ||
+    !Number.isSafeInteger(value.dosesRevision) || value.dosesRevision < 0)) return invalid();
   if (!validArray(value.doses, (item) => isDateKey(item.date) && isTime(item.time) && isString(item.label, 200) && !!item.label.trim()
     && isString(item.description, 2000) && (item.status === 'pending' || item.status === 'taken')
     && (item.status === 'taken' ? isTimestamp(item.takenAt)
@@ -432,9 +438,10 @@ export function validateLoadedState(value: unknown): AppState {
     && sameOffsets(value.reminders.medicationMinutesBefore, medicationMinutesBefore)
     && value.medicationSchedule !== undefined && state.visits && state.visitsRevision !== undefined && state.hospitalContact
     && sameContact(state.hospitalContact, hospitalContact) && state.hospitalContactsRevision !== undefined
+    && state.dosesRevision !== undefined
     && state.otherHospitalContacts?.every((contact, index) => sameContact(contact, otherHospitalContacts[index]))) return state;
   // Legacy simulated appointments stay archived and never become actual visit schedules.
   return { ...state, visits: state.visits ?? [], visitsRevision: state.visitsRevision ?? 0, hospitalContact, medicationSchedule,
-    otherHospitalContacts, hospitalContactsRevision: state.hospitalContactsRevision ?? 0,
+    otherHospitalContacts, hospitalContactsRevision: state.hospitalContactsRevision ?? 0, dosesRevision: state.dosesRevision ?? 0,
     reminders: { ...state.reminders, appointmentMinutesBefore, medicationMinutesBefore } };
 }

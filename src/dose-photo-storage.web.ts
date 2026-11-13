@@ -1,6 +1,6 @@
-import { normalizeDosePhoto, normalizePhotoVerification, type DosePhoto, type PhotoVerification } from './dose-photo';
+import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoVerification } from './dose-photo';
 
-export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification: PhotoVerification };
+export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification };
 const DATABASE_NAME = 'metacare-dose-photos';
 const STORE_NAME = 'photos';
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
@@ -88,13 +88,7 @@ function validateImage(uri: string, photo: DosePhoto): Promise<void> {
 
 /** Store camera bytes separately from AsyncStorage; no image is uploaded. */
 export async function saveDosePhoto(capture: DosePhotoCapture): Promise<DosePhoto> {
-  const photo = normalizeDosePhoto({
-    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`,
-    capturedAt: capture.capturedAt,
-    width: capture.width,
-    height: capture.height,
-    verification: normalizePhotoVerification(capture.verification, capture.capturedAt),
-  });
+  const photo = newDosePhoto(capture);
   const blob = captureBlob(capture.uri);
   await validateImage(capture.uri, photo);
   await transact('readwrite', store => store.add(blob, photo.id));

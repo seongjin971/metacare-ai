@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createInitialState, ensureDailyDoses, recordDose, validateLoadedState } from '../src/domain.ts';
-import { isDosePhoto, normalizeDosePhoto, type DosePhoto } from '../src/dose-photo.ts';
+import { isDosePhoto, newDosePhoto, normalizeDosePhoto, type DosePhoto } from '../src/dose-photo.ts';
 import { photoFor } from './fixtures.ts';
 
 const now = new Date(2026, 9, 28, 8, 5);
@@ -125,4 +125,17 @@ test('verification metadata must be valid and precede the durable record', () =>
   photo.verification!.checkedAt = new Date(now.getTime() + 1000).toISOString();
   assert.equal(recorded.doses[0].photo?.verification?.checkedAt, now.toISOString());
   assert.throws(() => validateLoadedState({ ...recorded, doses: recorded.doses.map((dose, index) => index === 0 ? { ...dose, photo: future } : dose) }));
+});
+
+test('a new capture becomes a photo reference with or without the paused pouch check', () => {
+  const capturedAt = now.toISOString();
+  const plain = newDosePhoto({ capturedAt, width: 1920, height: 1080 });
+  assert.match(plain.id, /^photo-\d+-[a-z0-9]*$/);
+  assert.equal('verification' in plain, false);
+  assert.deepEqual(newDosePhoto({ capturedAt, width: 640, height: 480 }, 'photo-web-1'), { id: 'photo-web-1', capturedAt, width: 640, height: 480 });
+  const verification = { method: 'medicine-pouch-text-v1', checkedAt: capturedAt } as const;
+  assert.deepEqual(newDosePhoto({ capturedAt, width: 640, height: 480, verification }, 'photo-web-2').verification, verification);
+  assert.throws(() => newDosePhoto({ capturedAt, width: 640, height: 480, verification: { method: 'guess', checkedAt: capturedAt } }, 'photo-web-3'));
+  assert.throws(() => newDosePhoto({ capturedAt, width: 0, height: 480 }));
+  assert.throws(() => newDosePhoto({ capturedAt: 'today', width: 640, height: 480 }));
 });

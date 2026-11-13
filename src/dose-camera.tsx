@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, C, Icon, s } from './ui';
 import { stampDosePhoto, type DoseCapture } from './stamp-dose-photo';
 import { choosePictureSize } from './picture-size';
+import { sharpenWebCamera } from './web-camera-resolution';
 import { FadeIn, MotionPressable as Pressable, useReducedMotion } from './motion';
 
 type Props = {
@@ -21,9 +22,12 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
   const reducedMotion = useReducedMotion();
   const inset = useSafeAreaInsets();
   const camera = useRef<CameraView | null>(null);
+  const stage = useRef<React.ComponentRef<typeof View>>(null);
   const alive = useRef(true);
   const active = useRef(AppState.currentState === 'active');
   const captureSession = useRef(0);
+  // Bumped whenever the live camera may change, so a slow onCameraReady for an older camera cannot enable capture.
+  const cameraGeneration = useRef(0);
   const busyRef = useRef<'permission' | 'capture' | 'stamp' | 'save' | null>(null);
   const [busy, setBusy] = useState<typeof busyRef.current>(null);
   const [permission, requestPermission, getPermission] = useCameraPermissions({ get: false });
@@ -39,8 +43,14 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
   const [pictureSize, setPictureSize] = useState<string | undefined>();
   const sizeChecked = useRef(false);
 
+  const resetCamera = () => {
+    cameraGeneration.current += 1;
+    setReady(false);
+  };
+
   const onCameraReady = async () => {
     if (!alive.current || !active.current) return;
+    const generation = cameraGeneration.current;
     if (Platform.OS !== 'web' && !sizeChecked.current && camera.current) {
       sizeChecked.current = true;
       try {
@@ -48,7 +58,9 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
         if (size && alive.current) setPictureSize(size);
       } catch { /* Keep the default size; saving still rejects photos above the sharing limit. */ }
     }
-    if (alive.current && active.current) setReady(true);
+    // On the web the stage is a DOM element that contains the camera's <video>.
+    if (Platform.OS === 'web') await sharpenWebCamera(stage.current);
+    if (alive.current && active.current && generation === cameraGeneration.current) setReady(true);
   };
 
   const checkPermission = useCallback(async () => {
@@ -65,6 +77,7 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
       const isActive = state === 'active';
       active.current = isActive;
       setForeground(isActive);
+      cameraGeneration.current += 1;
       setReady(false);
       if (!isActive) {
         captureSession.current += 1;
@@ -100,7 +113,7 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
           : '카메라 권한을 허용해야 사진으로 기록할 수 있어요.');
       }
       setMountFailed(false);
-      setReady(false);
+      resetCamera();
       setCameraKey(value => value + 1);
     } catch {
       if (alive.current) setError('카메라를 사용할 수 없어요. 기기 연결과 카메라 권한을 확인해 주세요.');
@@ -161,7 +174,7 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
     captureSession.current += 1;
     setCapture(null);
     setSaveFailed(false);
-    setReady(false);
+    resetCamera();
     setMountFailed(false);
     setError('');
     setCameraKey(value => value + 1);
@@ -183,7 +196,7 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
               <Icon name="close" color={busy === 'save' ? C.muted : C.navy} />
             </Pressable>
           </View>
-          <View style={[styles.stage, (cameraVisible || !!capture) && styles.darkStage]}>
+          <View ref={stage} style={[styles.stage, (cameraVisible || !!capture) && styles.darkStage]}>
             {busy === 'stamp' ? (
               <View style={styles.center}><ActivityIndicator color="white" /><Text style={styles.loading}>사진 준비 중…</Text></View>
             ) : capture ? (
@@ -203,7 +216,7 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
                   onCameraReady={() => { void onCameraReady(); }}
                   onMountError={() => {
                     if (!alive.current) return;
-                    setReady(false);
+                    resetCamera();
                     setMountFailed(true);
                     setError('카메라를 사용할 수 없어요. 다른 앱에서 사용 중인지와 카메라 권한을 확인해 주세요.');
                   }}
@@ -255,7 +268,13 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
                 <Pressable
                   accessibilityRole="button" accessibilityLabel="카메라 전환"
                   accessibilityState={{ disabled: !cameraVisible || !!busy }} disabled={!cameraVisible || !!busy}
-                  onPress={() => { setReady(false); setFacing(value => value === 'back' ? 'front' : 'back'); }}
+                  onPress={() => {
+                    resetCamera();
+                    setFacing(value => value === 'back' ? 'front' : 'back');
+                    // expo-camera on the web keeps a same-device stream without firing onCameraReady again
+                    // (a laptop's single webcam), so remount to get a fresh stream and a ready signal.
+                    if (Platform.OS === 'web') setCameraKey(value => value + 1);
+                  }}
                   style={styles.flip}
                 ><Icon name="camera-reverse-outline" color={cameraVisible && !busy ? C.blue : C.muted} /></Pressable>
                 <View style={{ flex: 1 }}><Button title={busy === 'capture' ? '촬영 중…' : '사진 촬영'} icon="camera-outline" disabled={!cameraVisible || !ready || !!busy} onPress={() => void takePhoto()} /></View>

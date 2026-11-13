@@ -111,10 +111,16 @@ function DoseRow({ dose, canCapture, overdueBy }: { dose: Dose; canCapture: bool
   );
 }
 
+/** The web sample keeps its records in memory only, so it takes no photo that would outlive them. */
+function useCanCapture() {
+  const { sample } = useCare();
+  return canCaptureDosePhoto() && !(sample && Platform.OS === 'web');
+}
+
 /** Today's single next action, so a missed or due dose is the first thing the patient sees. */
 function NextDoseCard({ doses, now, firstDay }: { doses: Dose[]; now: Date; firstDay: boolean }) {
-  const { state: care } = useCare();
-  const canCapture = canCaptureDosePhoto();
+  const { state: care, sample } = useCare();
+  const canCapture = useCanCapture();
   if (!doses.length) {
     if (!firstDay) return null;
     const first = care.medicationSchedule.times[0];
@@ -140,12 +146,14 @@ function NextDoseCard({ doses, now, firstDay }: { doses: Dose[]; now: Date; firs
       </View>
     </View>
     {canCapture ? <CaptureButton dose={dose} large />
-      : <Text style={s.muted}>약봉투 촬영은 메타케어 설치 앱에서 할 수 있어요.</Text>}
+      : <Text style={s.muted}>{Platform.OS !== 'web' ? '약봉투 촬영은 메타케어 설치 앱에서 할 수 있어요.'
+        : sample ? '미리보기에서는 새 기록을 남기지 않아요. 첫 화면에서 환자로 시작하면 촬영해 기록할 수 있어요.'
+          : '이 브라우저에서는 카메라를 쓸 수 없어요. 크롬이나 사파리에서 열거나 메타케어 설치 앱에서 촬영해 주세요.'}</Text>}
   </Card>;
 }
 
 function DoseList({ doses, now }: { doses: Dose[]; now: Date }) {
-  const canCapture = canCaptureDosePhoto();
+  const canCapture = useCanCapture();
   return (
     <View>
       {doses.map((dose, index) => {

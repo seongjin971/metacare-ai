@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { MAX_PHOTO_BYTES } from '../shared/care-photo-parts';
-import { normalizeDosePhoto, normalizePhotoVerification, type DosePhoto, type PhotoVerification } from './dose-photo';
+import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoVerification } from './dose-photo';
 
 export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification };
 
@@ -15,13 +15,7 @@ function photoFile(photo: DosePhoto) {
 
 /** Copy the camera's temporary file before committing its reference to a dose. */
 export async function saveDosePhoto(capture: DosePhotoCapture): Promise<DosePhoto> {
-  const photo = normalizeDosePhoto({
-    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`,
-    capturedAt: capture.capturedAt,
-    width: capture.width,
-    height: capture.height,
-    ...(capture.verification && { verification: normalizePhotoVerification(capture.verification, capture.capturedAt) }),
-  });
+  const photo = newDosePhoto(capture);
   if (typeof capture.uri !== 'string' || !capture.uri.startsWith('file://')) {
     throw new Error('촬영한 사진을 찾을 수 없어요. 다시 촬영해 주세요.');
   }

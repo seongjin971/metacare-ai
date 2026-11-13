@@ -4,7 +4,7 @@ import { photoFor } from './fixtures.ts';
 import {
   addDays, addVisit, createInitialState, ensureDailyDoses, localDateKey,
   hospitalNames, recordDose, removeVisit, selectHospital, setHospitalContact, setSharing, upcomingVisits,
-  validateLoadedState, visibleDoses, setPatientName, completeSetup, startedOn,
+  validateLoadedState, visibleDoses, setPatientName, completeSetup, startedOn, setMedicationSchedule,
 } from '../src/domain.ts';
 
 const now = new Date(2026, 9, 28, 9, 0, 0);
@@ -228,4 +228,23 @@ test('an upgraded user with recorded doses keeps today intact when the setup scr
   const done = completeSetup(recorded, '김정희', recorded.medicationSchedule, new Date(2026, 10, 12, 15));
   assert.equal(done.profile?.startedAt, undefined);
   assert.equal(done.doses.filter(dose => dose.date === '2026-11-12').length, recorded.doses.length);
+});
+
+test('recording, undoing and rescheduling advance the dose revision; generating a new day does not', () => {
+  const morning = new Date(2026, 10, 13, 7);
+  const evening = new Date(2026, 10, 13, 19, 5);
+  const state = createInitialState(morning);
+  assert.equal(state.dosesRevision, 0);
+  const dose = state.doses[state.doses.length - 1];
+  const recorded = recordDose(state, dose.id, true, evening, photoFor(evening));
+  assert.equal(recorded.dosesRevision, evening.getTime());
+  const undone = recordDose(recorded, dose.id, false, evening);
+  assert.equal(undone.dosesRevision, evening.getTime() + 1);
+  const nextDay = ensureDailyDoses(undone, new Date(2026, 10, 14, 7));
+  assert.ok(nextDay.doses.length > undone.doses.length);
+  assert.equal(nextDay.dosesRevision, undone.dosesRevision);
+  assert.ok(setMedicationSchedule(undone, { frequency: 'once', times: ['21:00'] }, evening).dosesRevision > undone.dosesRevision);
+  const { dosesRevision: _revision, ...legacy } = undone;
+  assert.equal(validateLoadedState(legacy).dosesRevision, 0);
+  for (const dosesRevision of [-1, 1.5, '1']) assert.throws(() => validateLoadedState({ ...undone, dosesRevision }));
 });

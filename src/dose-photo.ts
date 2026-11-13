@@ -41,6 +41,20 @@ export function normalizeDosePhoto(value: unknown): DosePhoto {
   };
 }
 
+/** A new photo reference for a capture. The pouch-text check is optional while it is paused. */
+export function newDosePhoto(
+  capture: { capturedAt: string; width: number; height: number; verification?: unknown },
+  id = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`,
+): DosePhoto {
+  return normalizeDosePhoto({
+    id,
+    capturedAt: capture.capturedAt,
+    width: capture.width,
+    height: capture.height,
+    ...(capture.verification ? { verification: normalizePhotoVerification(capture.verification, capture.capturedAt) } : {}),
+  });
+}
+
 export function isDosePhoto(value: unknown): value is DosePhoto {
   try { normalizeDosePhoto(value); return true; } catch { return false; }
 }

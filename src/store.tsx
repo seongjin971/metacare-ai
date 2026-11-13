@@ -6,7 +6,7 @@ import { NotificationSyncResult, syncReminders } from './notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FadeIn, MotionPressable as Pressable, useReducedMotion } from './motion';
 import { PatientSharingProvider } from './caregiver-link';
-import { mergeNewerVisitData, onWebVisitDataChanged, writeWebState } from './web-visit-storage';
+import { mergeNewerVisitData, onWebVisitDataChanged, readWebState, writeWebState } from './web-visit-storage';
 import { createSamplePatientState } from './sample-patient-state';
 import { restoreSampleMedication, SAMPLE_MEDICATION_KEY, serializeSampleMedication, withSampleMedicationHistory } from './sample-medication-storage';
 
@@ -144,9 +144,14 @@ export function CareProvider({ children, sample = false }: { children: React.Rea
     if (!loaded) return;
     const refresh = () => { const time = new Date(); setNow(time); const next = ensureDailyDoses(current.current, time); if (next !== current.current) update(() => next); };
     const timer = setInterval(refresh, 30000);
-    const subscription = NativeAppState.addEventListener('change', status => { if (status === 'active') refresh(); });
+    const subscription = NativeAppState.addEventListener('change', status => {
+      if (status !== 'active') return;
+      // A browser tab frozen in the background misses other tabs' saves; catch up before changing anything.
+      if (Platform.OS === 'web') { const saved = readWebState(STORAGE_KEY); if (saved) receiveVisitData(saved); }
+      refresh();
+    });
     return () => { clearInterval(timer); subscription.remove(); };
-  }, [loaded, update]);
+  }, [loaded, update, receiveVisitData]);
   useEffect(() => {
     if (!loaded || sample) return;
     const sequence = ++syncSequence.current;
