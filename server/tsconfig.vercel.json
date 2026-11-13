@@ -12,5 +12,5 @@
     "noEmitOnError": true,
     "rewriteRelativeImportExtensions": true
   },
-  "files": ["vercel-care.ts"]
+  "files": ["vercel-care.ts", "vercel-ai.ts"]
 }

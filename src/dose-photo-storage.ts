@@ -1,8 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { MAX_PHOTO_BYTES } from '../shared/care-photo-parts';
-import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoVerification } from './dose-photo';
+import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoReading, type PhotoVerification } from './dose-photo';
 
-export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification };
+export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification; reading?: PhotoReading };
 
 function directory() {
   return new Directory(Paths.document, 'dose-photos');

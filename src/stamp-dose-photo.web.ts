@@ -1,8 +1,9 @@
 import { MAX_PHOTO_BYTES } from '../shared/care-photo-parts';
 import { photoStampLabel } from './photo-stamp-label';
 import { fitPhotoSize, stampLayout } from './photo-stamp-layout';
+import type { PhotoReading } from './dose-photo';
 
-export type DoseCapture = { uri: string; capturedAt: string; width: number; height: number };
+export type DoseCapture = { uri: string; capturedAt: string; width: number; height: number; reading?: PhotoReading };
 
 const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
 /** The installed app's JPEG quality first; lower only if the photo would exceed the sharing limit. */

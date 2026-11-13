@@ -259,6 +259,7 @@ export function recordDose(state: AppState, doseId: string, taken: boolean, now 
   if (capturedPhoto) {
     if (Date.parse(capturedPhoto.capturedAt) > now.getTime()) throw new Error('사진 촬영 시간을 확인해 주세요.');
     if (capturedPhoto.verification && Date.parse(capturedPhoto.verification.checkedAt) > now.getTime()) throw new Error('사진 확인 시간을 확인해 주세요.');
+    if (capturedPhoto.reading && Date.parse(capturedPhoto.reading.checkedAt) > now.getTime()) throw new Error('AI 읽기 시간을 확인해 주세요.');
     if (state.doses.some(item => item.photo?.id === capturedPhoto.id)) throw new Error('이미 기록에 사용한 사진이에요. 새로 촬영해 주세요.');
   }
   const doses = state.doses.map((item): Dose => {
@@ -421,7 +422,8 @@ export function validateLoadedState(value: unknown): AppState {
     && isString(item.description, 2000) && (item.status === 'pending' || item.status === 'taken')
     && (item.status === 'taken' ? isTimestamp(item.takenAt)
       && (item.photo === undefined || (isDosePhoto(item.photo) && Date.parse(item.photo.capturedAt) <= Date.parse(item.takenAt)
-        && (!item.photo.verification || Date.parse(item.photo.verification.checkedAt) <= Date.parse(item.takenAt))))
+        && (!item.photo.verification || Date.parse(item.photo.verification.checkedAt) <= Date.parse(item.takenAt))
+        && (!item.photo.reading || Date.parse(item.photo.reading.checkedAt) <= Date.parse(item.takenAt))))
       : item.takenAt === undefined && item.photo === undefined))) return invalid();
   if (!validArray(value.activity, (item) => hasIdAndCreatedAt(item) && isString(item.text, 500) && !!item.text.trim())) return invalid();
   if (value.profile !== undefined && (!isObject(value.profile) || !Object.keys(value.profile).every(key => key === 'name' || key === 'startedAt')

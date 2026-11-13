@@ -8,12 +8,17 @@
     "api/care.mjs": {
       "includeFiles": "care-runtime/**"
     },
+    "api/ai.mjs": {
+      "includeFiles": "care-runtime/**",
+      "maxDuration": 45
+    },
     "api/overdue.mjs": {
       "includeFiles": "care-runtime/**",
       "experimentalTriggers": [{ "type": "queue/v2beta", "topic": "metacare-overdue", "retryAfterSeconds": 30 }]
     }
   },
   "routes": [
+    { "src": "^/v1/ai/(.+)$", "dest": "/api/ai?aiRoute=$1" },
     { "src": "^/v1/(.+)$", "dest": "/api/care?careRoute=$1" },
     { "handle": "filesystem" }
   ]

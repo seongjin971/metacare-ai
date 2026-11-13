@@ -68,7 +68,7 @@ function endpoint(request: Request): string {
   return agenda ? AGENDA_SNAPSHOT_PATH : path;
 }
 
-async function readBody(request: Request, limit: number): Promise<unknown> {
+export async function readBody(request: Request, limit: number): Promise<unknown> {
   if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get('content-type') ?? '')
     || ![null, 'identity'].includes(request.headers.get('content-encoding'))) throw new HttpError(415, 'Use application/json.');
   if (Number(request.headers.get('content-length')) > limit) throw new HttpError(413, 'Request is too large.');
@@ -115,15 +115,16 @@ async function requireEmptyBody(request: Request): Promise<void> {
   } finally { reader.releaseLock(); }
 }
 
-async function countAttempt(pool: Pool, key: string, now: number, maximum: number) {
+export async function countAttempt(pool: Pool, key: string, now: number, maximum: number, windowMs = tenMinutes,
+  message = '연결 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.') {
   const result = await pool.query<{ hits: number }>(
     `INSERT INTO metacare_rate_limits(ip_hash, reset_at, hits) VALUES($1, $3, 1)
      ON CONFLICT(ip_hash) DO UPDATE SET
        hits=CASE WHEN metacare_rate_limits.reset_at <= $2 THEN 1 ELSE LEAST(metacare_rate_limits.hits + 1, $4) END,
        reset_at=CASE WHEN metacare_rate_limits.reset_at <= $2 THEN $3 ELSE metacare_rate_limits.reset_at END
-     RETURNING hits`, [key, new Date(now), new Date(now + tenMinutes), maximum + 1],
+     RETURNING hits`, [key, new Date(now), new Date(now + windowMs), maximum + 1],
   );
-  if (result.rows[0].hits > maximum) throw new HttpError(429, '연결 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.');
+  if (result.rows[0].hits > maximum) throw new HttpError(429, message);
 }
 
 async function rateLimit(pool: Pool, request: Request, now: number) {
@@ -136,7 +137,7 @@ async function rateLimit(pool: Pool, request: Request, now: number) {
 
 type Options = { now?: () => number; allowedOrigins?: string[]; enqueue?: EnqueueOverdue };
 
-function isDeployedWebOrigin(value: string): boolean {
+export function isDeployedWebOrigin(value: string): boolean {
   try {
     const url = new URL(value);
     const host = url.hostname.replace(/\.$/, '');

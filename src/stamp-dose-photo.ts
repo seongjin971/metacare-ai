@@ -1,7 +1,8 @@
 import { isPhotoStampAvailable, stampPhoto } from '../modules/medication-photo-analyzer';
 import { photoStampLabel } from './photo-stamp-label';
+import type { PhotoReading } from './dose-photo';
 
-export type DoseCapture = { uri: string; capturedAt: string; width: number; height: number };
+export type DoseCapture = { uri: string; capturedAt: string; width: number; height: number; reading?: PhotoReading };
 
 /**
  * Dose photos are recorded as taken, with the capture time burned in, and the caregiver reviews

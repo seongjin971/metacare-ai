@@ -25,6 +25,8 @@ import { doseTiming, lateText, nextDose } from './dose-timing';
 import { CaregiverLinkCard } from './caregiver-link';
 import { HospitalContactCard } from './hospital-contact-card';
 import { useRoleActions } from './role-actions';
+import { AiPhotoReadingCard } from './ai-photo-reading-card';
+import { photoReadingLabel } from './pouch-reading-outcome';
 
 const AMBER = '#a66b1d';
 
@@ -76,7 +78,7 @@ function DoseRow({ dose, canCapture, overdueBy }: { dose: Dose; canCapture: bool
     ? new Date(dose.takenAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
     : '';
   const recordLabel = dose.photo?.verification ? '사진 인증' : dose.photo ? '사진 기록' : '자가 기록';
-  const recordDetail = `${recordLabel} ${recordedTime}`.trimEnd();
+  const recordDetail = [`${recordLabel} ${recordedTime}`.trimEnd(), dose.photo?.reading && photoReadingLabel(dose.photo.reading)].filter(Boolean).join(' · ');
   const undo = () => confirm({
     title: '복약 기록을 취소할까요?',
     body: `${dose.label} 기록을 미기록으로 바꿉니다.${dose.photo ? ' 이 기록에 첨부한 사진도 삭제돼요.' : ''}`,
@@ -336,6 +338,7 @@ function SharingAndReminderSettings() {
         </View>
         {!isWeb && notificationProblem && <Text accessibilityRole="alert" style={[s.muted, { color: '#a66b1d' }]}>{notificationStatus.message}</Text>}
       </Card>
+      {isWeb && <AiPhotoReadingCard />}
       {roleActions && <TextAction label="역할 변경" onPress={roleActions.changeRole} />}
       {editingReminder !== null && <ReminderTimePicker
         kind={editingReminder}

@@ -1,6 +1,6 @@
-import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoVerification } from './dose-photo';
+import { newDosePhoto, normalizeDosePhoto, type DosePhoto, type PhotoReading, type PhotoVerification } from './dose-photo';
 
-export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification };
+export type DosePhotoCapture = { uri: string; capturedAt: string; width: number; height: number; verification?: PhotoVerification; reading?: PhotoReading };
 const DATABASE_NAME = 'metacare-dose-photos';
 const STORE_NAME = 'photos';
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;

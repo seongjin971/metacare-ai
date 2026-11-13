@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, AppState, Image, Linking, Modal, Platform,
+  ActivityIndicator, AppState, Image, Linking, Modal, Platform, ScrollView,
   StyleSheet, Text, View,
 } from 'react-native';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
@@ -10,6 +10,13 @@ import { stampDosePhoto, type DoseCapture } from './stamp-dose-photo';
 import { choosePictureSize } from './picture-size';
 import { sharpenWebCamera } from './web-camera-resolution';
 import { FadeIn, MotionPressable as Pressable, useReducedMotion } from './motion';
+import { loadAiPhotoReading, saveAiPhotoReading } from './ai-photo-consent';
+import { requestPouchReading } from './ai-pouch-read';
+import { photoReadingFor } from './pouch-reading-outcome';
+import { PouchReadingPanel, type AiReadingState } from './pouch-reading-panel';
+
+/** The AI reading needs the photo as a data URL, which only the web camera produces for now. */
+const AI_READING = Platform.OS === 'web';
 
 type Props = {
   label: string;
@@ -42,6 +49,9 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
   const [saveFailed, setSaveFailed] = useState(false);
   const [pictureSize, setPictureSize] = useState<string | undefined>();
   const sizeChecked = useRef(false);
+  const [aiReading, setAiReading] = useState<AiReadingState>({ status: 'off' });
+  // The unstamped frame: the time label must not cover any of the pouch's print.
+  const aiSource = useRef<string | null>(null);
 
   const resetCamera = () => {
     cameraGeneration.current += 1;
@@ -123,7 +133,33 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
     }
   };
 
-  const saveCapture = async (photo: DoseCapture) => {
+  /**
+   * Reads the photo on screen with the AI. The result belongs to that photo: it is dropped only after
+   * a retake or close, not when the app briefly goes to the background while the photo stays.
+   */
+  const readPouch = async () => {
+    const source = aiSource.current;
+    if (!source) return;
+    setAiReading({ status: 'reading' });
+    try {
+      const reading = await requestPouchReading(source);
+      if (alive.current && aiSource.current === source) setAiReading({ status: 'done', reading: photoReadingFor(reading, label) });
+    } catch {
+      if (alive.current && aiSource.current === source) setAiReading({ status: 'failed' });
+    }
+  };
+
+  const allowAiReading = () => {
+    void saveAiPhotoReading('on').catch(() => undefined);
+    void readPouch();
+  };
+
+  const declineAiReading = () => {
+    void saveAiPhotoReading('off').catch(() => undefined);
+    setAiReading({ status: 'off' });
+  };
+
+  const saveCapture = async (captured: DoseCapture) => {
     const session = captureSession.current;
     const canCommit = () => alive.current && active.current && session === captureSession.current;
     if (!canCommit() || busyRef.current === 'save') return;
@@ -131,6 +167,8 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
     setBusy('save');
     setError('');
     setSaveFailed(false);
+    // A reading still in progress is left out rather than holding up the record.
+    const photo = aiReading.status === 'done' ? { ...captured, reading: aiReading.reading } : captured;
     const saved = await onSave(photo, canCommit).catch(() => false);
     busyRef.current = null;
     if (!alive.current) return;
@@ -161,6 +199,14 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
       const stamped = await stampDosePhoto(captured);
       if (!isCurrent()) return;
       setCapture(stamped);
+      if (AI_READING) {
+        aiSource.current = captured.uri;
+        // Reread for each photo so turning it off in another tab or in settings takes effect.
+        const choice = await loadAiPhotoReading({ fresh: true });
+        if (!isCurrent()) return;
+        if (choice === 'on') void readPouch();
+        else if (choice === null) setAiReading({ status: 'ask' });
+      }
     } catch {
       if (isCurrent()) setError('사진을 처리하지 못했어요. 다시 촬영해 주세요.');
     } finally {
@@ -173,6 +219,8 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
     if (busyRef.current) return;
     captureSession.current += 1;
     setCapture(null);
+    setAiReading({ status: 'off' });
+    aiSource.current = null;
     setSaveFailed(false);
     resetCamera();
     setMountFailed(false);
@@ -249,12 +297,16 @@ export function DoseCamera({ label, onClose, onSave }: Props) {
             )}
           </View>
           {(!!error || !!capture || cameraVisible) && <View style={styles.footer}>
-            {cameraVisible && !error && <Text style={s.muted}>찍은 날짜와 시간이 사진에 함께 남아요.</Text>}
-            {capture && !busy && !error && <Text style={s.muted}>이 사진이 보호자에게 전달돼요.</Text>}
-            {!!error && <FadeIn motionKey={error} style={{ gap: 4 }}>
-              {saveFailed && <Text style={styles.failureTitle}>기록 저장 실패</Text>}
-              <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
-            </FadeIn>}
+            {/* Notes scroll on a short screen so the buttons below always stay in view. */}
+            <ScrollView style={styles.notes} contentContainerStyle={styles.notesContent}>
+              {cameraVisible && !error && <Text style={s.muted}>찍은 날짜와 시간이 사진에 함께 남아요.</Text>}
+              {capture && !busy && !error && <Text style={s.muted}>이 사진이 보호자에게 전달돼요.</Text>}
+              {capture && busy !== 'stamp' && <PouchReadingPanel state={aiReading} label={label} onAllow={allowAiReading} onDecline={declineAiReading} />}
+              {!!error && <FadeIn motionKey={error} style={{ gap: 4 }}>
+                {saveFailed && <Text style={styles.failureTitle}>기록 저장 실패</Text>}
+                <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+              </FadeIn>}
+            </ScrollView>
             {capture ? (
               busy ? <View accessibilityLiveRegion="polite" style={styles.processing}>
                 <ActivityIndicator color={C.blue} />
@@ -299,7 +351,9 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24 },
   message: { fontSize: 15, lineHeight: 24, color: C.navy, textAlign: 'center' },
   loading: { color: C.white, fontSize: 14 },
-  footer: { padding: 16, gap: 12 },
+  footer: { padding: 16, gap: 12, flexShrink: 1 },
+  notes: { flexGrow: 0, flexShrink: 1 },
+  notesContent: { gap: 12 },
   processing: { minHeight: 48, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 },
   processingText: { color: C.navy, fontSize: 15, fontWeight: '600' },
   failureTitle: { color: C.navy, fontSize: 16, fontWeight: '700' },

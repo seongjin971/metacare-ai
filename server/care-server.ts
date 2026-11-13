@@ -13,6 +13,8 @@ import { AGENDA_SNAPSHOT_PATH, keys, record, routeCare, tokenDigest, validPatien
 import { HttpError } from './care-errors.ts';
 import { claimLocalAlert, disableLocalAlert, planLocalAlert, updateLocalAlerts, validLocalAlerts, type LocalAlert } from './local-overdue.ts';
 import { RetryablePushError, sendOverduePush } from './overdue.ts';
+import { POUCH_READ_PATH } from '../shared/pouch-reading.ts';
+import { createClaudePouchReader, POUCH_READ_REQUEST_LIMIT, routePouchRead, type PouchReader } from './ai-pouch.ts';
 
 type State = { version: 1; patients: Patient[]; alerts: LocalAlert[] };
 type Options = {
@@ -24,6 +26,9 @@ type Options = {
   sendOverdue?: typeof sendOverduePush;
   inviteTtlMs?: number;
   rateLimit?: { maxRequests: number; windowMs: number };
+  /** Reads pouch photos for POST /v1/ai/pouch-read; without it the route answers 503. */
+  pouchReader?: PouchReader;
+  aiRateLimit?: { maxRequests: number; windowMs: number };
 };
 const DEFAULT_DATA_PATH = fileURLToPath(new URL('./data/care.json', import.meta.url));
 const JSON_LIMIT = 256 * 1024;
@@ -104,8 +109,10 @@ export async function startCareServer(options: Options = {}) {
   const now = options.now ?? Date.now;
   const ttl = options.inviteTtlMs ?? 10 * 60 * 1000;
   const rateLimit = options.rateLimit ?? { maxRequests: 30, windowMs: 10 * 60 * 1000 };
-  if (!Number.isFinite(ttl) || ttl <= 0 || !Number.isInteger(rateLimit.maxRequests) || rateLimit.maxRequests < 1
-    || !Number.isFinite(rateLimit.windowMs) || rateLimit.windowMs <= 0) throw new Error('Invalid care server limits.');
+  const aiRateLimit = options.aiRateLimit ?? { maxRequests: 20, windowMs: 10 * 60 * 1000 };
+  const validLimit = (limit: { maxRequests: number; windowMs: number }) => Number.isInteger(limit.maxRequests) && limit.maxRequests >= 1
+    && Number.isFinite(limit.windowMs) && limit.windowMs > 0;
+  if (!Number.isFinite(ttl) || ttl <= 0 || !validLimit(rateLimit) || !validLimit(aiRateLimit)) throw new Error('Invalid care server limits.');
   const configuredOrigins: string[] = options.allowedOrigins ?? String(process.env.CARE_ALLOWED_ORIGINS ?? '').split(',').map(item => item.trim()).filter(Boolean);
   for (const origin of configuredOrigins) {
     const parsed = new URL(origin);
@@ -186,19 +193,21 @@ export async function startCareServer(options: Options = {}) {
         ...(alert?.settings.enabled && { registrationId: alert.registrationId }) } };
     },
   };
-  const limited = (request: IncomingMessage) => {
+  const limiter = (entries: Map<string, { count: number; resetAt: number }>, limit: { maxRequests: number; windowMs: number }, message: string) => (request: IncomingMessage) => {
     const timestamp = now();
-    for (const [key, value] of attempts) if (value.resetAt <= timestamp) attempts.delete(key);
+    for (const [key, value] of entries) if (value.resetAt <= timestamp) entries.delete(key);
     const key = request.socket.remoteAddress ?? 'unknown';
-    let entry = attempts.get(key);
+    let entry = entries.get(key);
     if (!entry) {
-      if (attempts.size >= 10000) throw new HttpError(429, '연결 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.');
-      entry = { count: 0, resetAt: timestamp + rateLimit.windowMs };
-      attempts.set(key, entry);
+      if (entries.size >= 10000) throw new HttpError(429, message);
+      entry = { count: 0, resetAt: timestamp + limit.windowMs };
+      entries.set(key, entry);
     }
     entry.count += 1;
-    if (entry.count > rateLimit.maxRequests) throw new HttpError(429, '연결 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.');
+    if (entry.count > limit.maxRequests) throw new HttpError(429, message);
   };
+  const limited = limiter(attempts, rateLimit, '연결 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.');
+  const aiLimited = limiter(new Map(), aiRateLimit, 'AI 사진 읽기 요청이 너무 많아요. 잠시 후 다시 시도해 주세요.');
 
   const respond = (response: ServerResponse, status: number, body: unknown) => {
     if (response.destroyed || response.writableEnded) return;
@@ -222,6 +231,13 @@ export async function startCareServer(options: Options = {}) {
       const path = url.pathname + url.search;
       if (url.search && (path !== AGENDA_SNAPSHOT_PATH || !['GET', 'OPTIONS'].includes(request.method ?? ''))) throw new HttpError(400, 'Query parameters are not supported.');
       if (request.method === 'OPTIONS') { response.statusCode = 204; response.end(); return; }
+      if (url.pathname === POUCH_READ_PATH) {
+        if (request.method !== 'POST') throw new HttpError(405, 'Use POST.');
+        aiLimited(request);
+        const result = await routePouchRead(await readJson(request, POUCH_READ_REQUEST_LIMIT), options.pouchReader);
+        respond(response, result.status, result.body);
+        return;
+      }
       if (request.method === 'POST' && (url.pathname === '/v1/patients' || url.pathname === '/v1/caregivers/connect')) limited(request);
       // Check credentials before accepting a potentially large photo body. The
       // queued route checks again, so a concurrent revocation cannot be bypassed.
@@ -282,7 +298,13 @@ export async function startCareServer(options: Options = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const port = Number(process.env.CARE_PORT ?? 8789);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('CARE_PORT must be a valid TCP port.');
-  const running = await startCareServer({ port, host: process.env.CARE_HOST ?? '127.0.0.1' });
+  // Only an explicit key and the public API endpoint: no other credential or base URL from the environment.
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const pouchReader = apiKey ? createClaudePouchReader(async () => {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    return new Anthropic({ apiKey, baseURL: 'https://api.anthropic.com' });
+  }, { model: process.env.CARE_AI_MODEL, effort: process.env.CARE_AI_EFFORT }) : undefined;
+  const running = await startCareServer({ port, host: process.env.CARE_HOST ?? '127.0.0.1', pouchReader });
   console.log(`MetaCare local sharing prototype listening on http://${running.address.address}:${running.port}`);
   console.log('LOCAL PROTOTYPE: use synthetic records; not a deployed medical service.');
   const shutdown = () => { void running.close().then(() => process.exit(0)); };
